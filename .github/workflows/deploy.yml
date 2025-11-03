@@ -42,7 +42,7 @@ jobs:
           --max-instances 50 \
           --min-instances 0 \
           --service-account ${{ env.RUNTIME_SA }} \
-          --set-env-vars "GOOGLE_CLOUD_PROJECT=${{ env.PROJECT_ID }},SECRET_KEY=${{ secrets.SECRET_KEY }},ENVIRONMENT=production,LOG_NAME=frontend_client_logs,APP_VERSION=${{ github.sha }}"
+          --set-env-vars "GOOGLE_CLOUD_PROJECT=${{ env.PROJECT_ID }},SECRET_KEY=${{ secrets.SECRET_KEY }},ENVIRONMENT=production,LOG_NAME=frontend_client_logs"
           # note: no --port; app should listen on $PORT (Cloud Run sets it)
 
     - name: Show service URL

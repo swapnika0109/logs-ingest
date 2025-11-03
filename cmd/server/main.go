@@ -127,7 +127,7 @@ func scrubPII(entry LogEntry, extraFields map[string]interface{}) map[string]int
 	result["_ingest"] = map[string]interface{}{
 		"service":    "logs-ingest",
 		"ingestedAt": time.Now().UTC().Format(time.RFC3339Nano),
-		"version":    os.Getenv("APP_VERSION"),
+		// "version":    os.Getenv("APP_VERSION"),
 	}
 
 	// Copy any extra fields that might have been decoded
