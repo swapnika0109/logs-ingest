@@ -1,0 +1,19 @@
+# Binaries
+main
+*.exe
+
+# Logs
+logs/
+
+# Sensitive files
+.env
+.env.local
+.env.production
+.env.staging
+internal/services/database/serviceAccount.json
+cmd/server/serviceAccount.json
+*.json
+
+# But allow these JSON files
+!docs/swagger.json
+!docs/swagger.yaml
