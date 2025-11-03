@@ -10,7 +10,7 @@ env:
   PROJECT_ID: riokutty
   REGION: us-central1
   SERVICE_NAME: logs-ingest
-  RUNTIME_SA: logs-ingest-sa@riokutty.iam.gserviceaccount.com
+  RUNTIME_SA: rio-go-model@riokutty.iam.gserviceaccount.com
 
 jobs:
   deploy:
