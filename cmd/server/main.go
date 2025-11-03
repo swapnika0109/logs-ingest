@@ -2,7 +2,6 @@ package main
 
 import (
 	"compress/gzip"
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -15,15 +14,11 @@ import (
 	"strings"
 	"time"
 
-	"cloud.google.com/go/logging"
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwt"
-	"google.golang.org/api/option"
 )
 
 var (
-	logClient  *logging.Client
-	logger     *logging.Logger
 	emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
 )
 
@@ -50,22 +45,6 @@ type rawLogEntry struct {
 	Error       string                 `json:"error,omitempty"`
 	StackTrace  string                 `json:"stackTrace,omitempty"`
 	Extra       map[string]interface{} `json:"-"`
-}
-
-// Severity mapping from level to Cloud Logging severity
-func mapSeverity(level string) logging.Severity {
-	switch strings.ToLower(level) {
-	case "error", "err", "fatal":
-		return logging.Error
-	case "warn", "warning":
-		return logging.Warning
-	case "info", "information":
-		return logging.Info
-	case "debug", "trace", "verbose":
-		return logging.Debug
-	default:
-		return logging.Info
-	}
 }
 
 // hashEmail hashes an email address using SHA256 with optional salt
@@ -233,6 +212,7 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func logsHandler(w http.ResponseWriter, r *http.Request) {
+	log.Printf("📝Attempting to ingest logs")
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -243,11 +223,27 @@ func logsHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
+
+	// Log first 50 chars for debugging
+	tokenPreview := tokenStr
+	if len(tokenStr) > 50 {
+		tokenPreview = tokenStr[:50] + "..."
+	}
+	log.Printf("🔑 Raw Authorization header: %s", tokenPreview)
+
+	// Strip "Bearer " prefix if present
+	if len(tokenStr) > 7 && tokenStr[:7] == "Bearer " {
+		tokenStr = tokenStr[7:]
+		log.Printf("✂️  Stripped Bearer prefix, token length: %d", len(tokenStr))
+	}
+
 	_, _, _, err := validateToken(tokenStr)
 	if err != nil {
+		log.Printf("❌ Token validation failed: %v", err)
 		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusUnauthorized)
 		return
 	}
+	log.Printf("✅ Token validated successfully")
 
 	// Check Content-Length to prevent abuse
 	const maxSize = 1 << 20 // 1 MB
@@ -323,17 +319,19 @@ func logsHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Write to Cloud Logging
-		logger.Log(logging.Entry{
-			Timestamp: timestamp,
-			Severity:  mapSeverity(entry.Level),
-			Payload:   logData,
-			Labels: map[string]string{
-				"platform":    entry.Platform,
-				"environment": entry.Environment,
-				"stream":      "client",
-			},
-		})
+		// Add timestamp to log data
+		logData["timestamp"] = timestamp.Format(time.RFC3339Nano)
+
+		// Output structured log as JSON (Cloud Run automatically captures this)
+		logJSON, err := json.Marshal(logData)
+		if err == nil {
+			// Output as structured JSON log
+			log.Printf("[CLIENT_LOG] %s", string(logJSON))
+		} else {
+			// Fallback to simple logging
+			log.Printf("[CLIENT_LOG] level=%s message=%s platform=%s environment=%s",
+				entry.Level, entry.Message, entry.Platform, entry.Environment)
+		}
 
 		validCount++
 	}
@@ -359,13 +357,12 @@ func validateToken(tokenStr string) (string, string, int64, error) {
 
 		secretKey := os.Getenv("SECRET_KEY")
 		if secretKey == "" {
+			log.Printf("⚠️  SECRET_KEY environment variable not set")
 			return "", "", 0, fmt.Errorf("SECRET_KEY environment variable not set")
 		}
-		// --- START TEMPORARY DEBUGGING ---
-		// Using a hardcoded byte slice to eliminate any possibility of
-		// string-to-byte conversion or encoding issues.
+		log.Printf("🔐 SECRET_KEY found, length: %d", len(secretKey))
+
 		secretKeyBytes := []byte(secretKey)
-		// --- END TEMPORARY DEBUGGING ---
 
 		// Use the jwx library, but disable time validation for this test.
 		token, err := jwt.Parse(
@@ -436,46 +433,19 @@ func validateToken(tokenStr string) (string, string, int64, error) {
 
 func main() {
 	// Load configuration from environment
-	projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
-	if projectID == "" {
-		log.Fatal("❌ GOOGLE_CLOUD_PROJECT environment variable is required")
-	}
-
-	logName := os.Getenv("LOG_NAME")
-	if logName == "" {
-		logName = "frontend_client_logs"
-	}
-
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080"
+		port = "8082"
+	}
+
+	environment := os.Getenv("ENVIRONMENT")
+	if environment == "" {
+		environment = "development"
 	}
 
 	log.Printf("🚀 Initializing logs-ingest service...")
-	log.Printf("📋 Project ID: %s", projectID)
-	log.Printf("📝 Log Name: %s", logName)
-
-	// Initialize Cloud Logging client
-	ctx := context.Background()
-
-	// Check if we're running in GCP (Cloud Run) or locally
-	// In Cloud Run, use default credentials; locally, you might need service account
-	var opts []option.ClientOption
-	serviceAccountPath := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
-	if serviceAccountPath != "" {
-		opts = append(opts, option.WithCredentialsFile(serviceAccountPath))
-	}
-
-	var err error
-	logClient, err = logging.NewClient(ctx, projectID, opts...)
-	if err != nil {
-		log.Fatalf("❌ Failed to create Cloud Logging client: %v", err)
-	}
-	defer logClient.Close()
-
-	logger = logClient.Logger(logName)
-
-	log.Printf("✅ Cloud Logging client initialized")
+	log.Printf("🌍 Environment: %s", environment)
+	log.Printf("📝 Logs will be written to stdout (captured by Cloud Run automatically)")
 
 	// Setup HTTP server
 	mux := http.NewServeMux()
@@ -505,14 +475,6 @@ func main() {
 	}
 
 	log.Printf("🌐 Starting server on port %s", port)
-	log.Printf("📡 Health check: http://localhost:%s/health", port)
-	log.Printf("📝 Logs endpoint: http://localhost:%s/v1/logs", port)
-
-	if os.Getenv("INGEST_API_KEY") != "" {
-		log.Printf("🔒 API key authentication enabled")
-	} else {
-		log.Printf("⚠️  API key authentication disabled (set INGEST_API_KEY)")
-	}
 
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("❌ Server error: %v", err)
