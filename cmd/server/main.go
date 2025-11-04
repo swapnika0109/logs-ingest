@@ -220,8 +220,12 @@ func logsHandler(w http.ResponseWriter, r *http.Request) {
 
 	tokenStr := r.Header.Get("Authorization")
 	if tokenStr == "" {
-		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-		return
+		cookie, err := r.Cookie("session_token")
+		if err != nil {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		tokenStr = cookie.Value
 	}
 
 	// Log first 50 chars for debugging
