@@ -468,11 +468,19 @@ func main() {
 
 	// Add CORS headers for browser and mobile apps
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Set CORS headers for all requests
+		// Set CORS headers for all requests (Authorization-based calls; no credentials)
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Encoding, Authorization, X-API-Key")
 		w.Header().Set("Access-Control-Max-Age", "3600")
+		// Echo back requested headers so preflight with sec-ch-* passes
+		reqHeaders := r.Header.Get("Access-Control-Request-Headers")
+		if reqHeaders == "" {
+			reqHeaders = "Content-Type, Authorization, Content-Encoding, X-API-Key"
+		}
+		w.Header().Set("Access-Control-Allow-Headers", reqHeaders)
+		// Help caches/proxies vary on Origin and requested headers
+		w.Header().Add("Vary", "Origin")
+		w.Header().Add("Vary", "Access-Control-Request-Headers")
 
 		// Handle preflight OPTIONS request
 		if r.Method == http.MethodOptions {
