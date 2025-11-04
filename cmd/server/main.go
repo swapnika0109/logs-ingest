@@ -454,18 +454,20 @@ func main() {
 	mux.HandleFunc("/api/v1/logs", logsHandler)
 	mux.HandleFunc("/logs", logsHandler) // Alias for convenience
 
-	// Add CORS headers for mobile apps (optional)
+	// Add CORS headers for browser and mobile apps
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Simple CORS for POST requests
+		// Set CORS headers for all requests
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Encoding, Authorization, X-API-Key")
+		w.Header().Set("Access-Control-Max-Age", "3600")
+
+		// Handle preflight OPTIONS request
 		if r.Method == http.MethodOptions {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key")
 			w.WriteHeader(http.StatusOK)
 			return
 		}
 
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		mux.ServeHTTP(w, r)
 	})
 
