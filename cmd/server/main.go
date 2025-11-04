@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
@@ -256,25 +257,32 @@ func logsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Handle gzip compression
-	var reader io.Reader = r.Body
-	defer r.Body.Close()
-
-	if strings.Contains(r.Header.Get("Content-Encoding"), "gzip") {
-		gz, err := gzip.NewReader(r.Body)
-		if err != nil {
-			http.Error(w, `{"error":"invalid gzip encoding"}`, http.StatusBadRequest)
-			return
-		}
-		defer gz.Close()
-		reader = gz
-	}
-
-	// Read and parse request body
-	body, err := io.ReadAll(io.LimitReader(reader, maxSize))
+	// Read request body (limit to maxSize)
+	raw, err := io.ReadAll(io.LimitReader(r.Body, maxSize))
 	if err != nil {
 		http.Error(w, `{"error":"failed to read request body"}`, http.StatusBadRequest)
 		return
+	}
+	defer r.Body.Close()
+
+	// Decide whether to treat as gzip: header OR gzip magic bytes 0x1f, 0x8b
+	body := raw
+	isGzipHeader := strings.Contains(strings.ToLower(r.Header.Get("Content-Encoding")), "gzip")
+	isGzipMagic := len(raw) >= 2 && raw[0] == 0x1f && raw[1] == 0x8b
+	if isGzipHeader || isGzipMagic {
+		gz, err := gzip.NewReader(bytes.NewReader(raw))
+		if err == nil {
+			defer gz.Close()
+			if decompressed, derr := io.ReadAll(gz); derr == nil {
+				body = decompressed
+			} else {
+				// Fall back to raw body
+				log.Printf("⚠️  Gzip body read failed, falling back to raw JSON: %v", derr)
+			}
+		} else {
+			// Fall back to raw body if gzip reader fails
+			log.Printf("⚠️  Invalid gzip encoding, using raw body: %v", err)
+		}
 	}
 
 	// Parse log entries
